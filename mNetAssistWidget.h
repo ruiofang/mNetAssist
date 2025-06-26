@@ -140,6 +140,8 @@ private:
     bool showLogHeader;    // 是否显示日志头部
     bool showSentData;     // 是否显示发送数据
     bool showReceivedData; // 是否显示接收数据
+
+    bool isSelectingHistory;
 };
 
 #endif // WIDGET_H

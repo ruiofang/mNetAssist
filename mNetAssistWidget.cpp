@@ -16,12 +16,14 @@
 #include <QTextCursor>
 #include <QTextCharFormat>
 #include <QColor>
+#include <QDebug>
 
 const char toHex[16] = {'0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F'};
 
 mNetAssistWidget::mNetAssistWidget(QWidget *parent) :
     QWidget(parent),
-    ui(new Ui::mNetAssistWidget)
+    ui(new Ui::mNetAssistWidget),
+    isSelectingHistory(false)
 {
     ui->setupUi(this);
 
@@ -69,6 +71,11 @@ mNetAssistWidget::mNetAssistWidget(QWidget *parent) :
      // 初始化历史发送功能
      maxHistorySize = 20; // 最多保存20条历史记录
      sendHistory.clear();
+     
+     // 确保历史发送下拉框有提示文本
+     if (ui->cBoxSendHistory->count() == 0) {
+         ui->cBoxSendHistory->addItem("选择历史发送内容...");
+     }
      
      // 初始化连接历史功能
      maxConnectionHistorySize = 15; // 最多保存15条连接历史
@@ -295,17 +302,14 @@ void mNetAssistWidget::on_pBtnSendData_clicked()
         hasSnd = hasSnd/1024/1024;
         QString hasSndSz = QString("%1").arg(hasSnd);
         ui->ReceiveTextEdit->appendPlainText(tr("共发送数据：")+hasSndSz+"MB");
-
         ui->pBtnSendData->setText(tr("发送"));
         ui->pBtnSendData->setEnabled(true);
         return;
     }
-
     if(ui->tEditSendText->toPlainText().size()==0) {
         QMessageBox::information(this,tr("提示"),tr("发送区为空，请输入内容。"));
         return;  //如果发送区为空则直接跳出
     }
-
     if(ui->cBoxLoopSnd->checkState())
     {
         if( !loopSending){
@@ -318,12 +322,20 @@ void mNetAssistWidget::on_pBtnSendData_clicked()
             loopSending=false;
         }
     }else{
-        // 保存到历史记录
         QString sendData = ui->tEditSendText->toPlainText();
-        if (!sendData.isEmpty()) {
-            addToSendHistory(sendData);
+        
+        // 检查当前文本框内容是否与历史记录匹配
+        bool isFromHistory = false;
+        for(int i = 0; i < sendHistory.size(); i++) {
+            if(sendData == sendHistory.at(i)) {
+                isFromHistory = true;
+                break;
+            }
         }
         
+        if (!sendData.isEmpty() && !isFromHistory) {
+            addToSendHistory(sendData);
+        }
         toSendData();
         if(ui->cBox_AntoClearSnd->checkState()){
             ui->tEditSendText->clear();
@@ -335,48 +347,52 @@ void mNetAssistWidget::on_pBtnSendData_clicked()
 //send data
 void mNetAssistWidget::toSendData()
 {
+    // 直接获取文本框内容
+    QString textToSend = ui->tEditSendText->toPlainText();
+    
+    if(textToSend.isEmpty()) {
+        return;
+    }
+    
     QByteArray datagram;
-
+    
+    // 根据模式处理数据
     if(ui->cBox_SndHexDisp->checkState()){
-        QStringList hexStr = ui->tEditSendText->toPlainText().split(" ",QString::SkipEmptyParts);
-        int hexSize = hexStr.size();
-        for(int i=0;i<hexSize;i++){
+        // 十六进制模式
+        QStringList hexStr = textToSend.split(" ", QString::SkipEmptyParts);
+        for(int i = 0; i < hexStr.size(); i++){
             QString hexSubStr = hexStr.at(i);
             datagram.append(ConvertHexStr(hexSubStr));
         }
-        datagram.resize(hexSize);
-    }else{
-        datagram = ui->tEditSendText->toPlainText().toLocal8Bit();
-    }
-
-    if(datagram.size()==0)   return;
-
-    // 记录发送数据到日志
-    QString logData;
-    if(ui->cBox_SndHexDisp->checkState()){
-        // 十六进制模式显示
-        logData = ui->tEditSendText->toPlainText();
     } else {
-        // 文本模式显示
-        logData = QString::fromLocal8Bit(datagram);
+        // 文本模式 - 直接发送文本框内容
+        datagram = textToSend.toLocal8Bit();
     }
+    
+    if(datagram.size() == 0) {
+        return;
+    }
+    
+    // 记录发送数据到日志
+    QString logData = textToSend; // 直接使用文本框内容作为日志
     logSentData(logData);
-
+    
+    // 根据网络类型发送
     if(ui->cBoxNetType->currentIndex() == UDP_MODE){
-        udpSocket->writeDatagram(datagram.data(), datagram.size(),rmtAddr, rmtPort);
-    }else if(ui->cBoxNetType->currentIndex() == TCP_SERVER_MODE){
-        int idx = ui->cBoxClients->currentIndex() ;
+        udpSocket->writeDatagram(datagram.data(), datagram.size(), rmtAddr, rmtPort);
+    } else if(ui->cBoxNetType->currentIndex() == TCP_SERVER_MODE){
+        int idx = ui->cBoxClients->currentIndex();
         if(idx == 0){
-             emit sendDataToClient((char *)datagram.data(), datagram.size(),0,0);
-        }else{
-             emit sendDataToClient((char *)datagram.data(), datagram.size(),tcpClientSocketDescriptorList.at(idx),0);
+            emit sendDataToClient((char *)datagram.data(), datagram.size(), 0, 0);
+        } else {
+            emit sendDataToClient((char *)datagram.data(), datagram.size(), tcpClientSocketDescriptorList.at(idx), 0);
         }
-    }else if(ui->cBoxNetType->currentIndex() == TCP_CLIENT_MODE){
+    } else if(ui->cBoxNetType->currentIndex() == TCP_CLIENT_MODE){
         tcpClientSocket->write(datagram.data(), datagram.size());
     }
-
-    sndDataCnt+=datagram.size();
-    ui->lEdit_SndCnt->setText(QString::number(sndDataCnt,10));
+    
+    sndDataCnt += datagram.size();
+    ui->lEdit_SndCnt->setText(QString::number(sndDataCnt, 10));
 }
 
 /**********************************************************/
@@ -898,7 +914,8 @@ void mNetAssistWidget::addToSendHistory(const QString &data)
     int existingIndex = sendHistory.indexOf(trimmedData);
     if (existingIndex != -1) {
         sendHistory.removeAt(existingIndex);
-        ui->cBoxSendHistory->removeItem(existingIndex + 1); // +1 因为第一项是提示文本
+        // 从下拉框中移除对应的项目（索引需要+1，因为第一项是提示文本）
+        ui->cBoxSendHistory->removeItem(existingIndex + 1);
     }
     
     // 添加到历史记录开头
@@ -927,13 +944,22 @@ void mNetAssistWidget::addToSendHistory(const QString &data)
 void mNetAssistWidget::on_cBoxSendHistory_currentTextChanged(const QString &text)
 {
     if (text == "选择历史发送内容..." || text.isEmpty()) {
-        return; // 忽略提示文本
+        return;
     }
     
-    // 找到对应的完整历史记录
+    isSelectingHistory = true;
     int index = ui->cBoxSendHistory->currentIndex() - 1; // -1 因为第一项是提示文本
+    
     if (index >= 0 && index < sendHistory.size()) {
-        ui->tEditSendText->setPlainText(sendHistory.at(index));
+        QString selectedData = sendHistory.at(index);
+        ui->tEditSendText->setPlainText(selectedData);
+        
+        // 使用QTimer延迟重置标志，避免信号冲突
+        QTimer::singleShot(100, [this]() {
+            isSelectingHistory = false;
+        });
+    } else {
+        isSelectingHistory = false;
     }
 }
 
@@ -1140,6 +1166,11 @@ void mNetAssistWidget::loadSendHistory()
     QSettings settings(historyFilePath, QSettings::IniFormat);
     settings.beginGroup("SendHistory");
     
+    // 确保下拉框有提示文本
+    if (ui->cBoxSendHistory->count() == 0) {
+        ui->cBoxSendHistory->addItem("选择历史发送内容...");
+    }
+    
     // 加载发送历史
     int sendSize = settings.beginReadArray("SendHistory");
     for (int i = 0; i < sendSize && i < maxHistorySize; ++i) {
@@ -1148,7 +1179,7 @@ void mNetAssistWidget::loadSendHistory()
         if (!data.isEmpty()) {
             sendHistory.append(data);
             
-            // 更新下拉列表
+            // 更新下拉列表（添加到第二项，第一项是提示文本）
             QString displayText = data;
             if (displayText.length() > 50) {
                 displayText = displayText.left(50) + "...";
