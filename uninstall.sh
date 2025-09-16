@@ -42,6 +42,13 @@ if [ -f "$DESKTOP_FILE" ]; then
     rm -f "$DESKTOP_FILE"
 fi
 
+# 删除系统图标
+SYSTEM_ICON_FILE="/usr/share/icons/hicolor/256x256/apps/mNetAssist.png"
+if [ -f "$SYSTEM_ICON_FILE" ]; then
+    echo "删除系统图标: $SYSTEM_ICON_FILE"
+    rm -f "$SYSTEM_ICON_FILE"
+fi
+
 # 删除安装目录
 if [ -d "$INSTALL_DIR" ]; then
     echo "删除安装目录: $INSTALL_DIR"
@@ -52,6 +59,12 @@ fi
 if command -v update-desktop-database &> /dev/null; then
     echo "更新桌面数据库..."
     update-desktop-database /usr/share/applications/
+fi
+
+# 清除图标缓存
+echo "清除图标缓存..."
+if command -v gtk-update-icon-cache &> /dev/null; then
+    gtk-update-icon-cache -f -t /usr/share/icons/hicolor/ 2>/dev/null || true
 fi
 
 echo ""

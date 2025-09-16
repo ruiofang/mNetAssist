@@ -49,6 +49,13 @@ chmod +x "$INSTALL_DIR/$APP_NAME"
 echo "复制图标文件..."
 cp "$ICON_FILE" "$INSTALL_DIR/"
 
+# 同时将图标安装到系统图标目录
+echo "安装图标到系统目录..."
+SYSTEM_ICON_DIR="/usr/share/icons/hicolor/256x256/apps"
+mkdir -p "$SYSTEM_ICON_DIR"
+cp "$ICON_FILE" "$SYSTEM_ICON_DIR/mNetAssist.png"
+chmod 644 "$SYSTEM_ICON_DIR/mNetAssist.png"
+
 # 复制LICENSE文件（如果存在）
 if [ -f "./LICENSE" ]; then
     echo "复制许可证文件..."
@@ -66,7 +73,7 @@ Name[zh_CN]=网络调试助手
 Comment=Network debugging assistant
 Comment[zh_CN]=网络调试助手工具
 Exec=$INSTALL_DIR/$APP_NAME
-Icon=$INSTALL_DIR/$APP_NAME.png
+Icon=mNetAssist
 Terminal=false
 Categories=Development;Network;Utility;
 StartupNotify=true
@@ -85,6 +92,25 @@ ln -sf "$INSTALL_DIR/$APP_NAME" "/usr/local/bin/$APP_NAME"
 if command -v update-desktop-database &> /dev/null; then
     echo "更新桌面数据库..."
     update-desktop-database /usr/share/applications/
+fi
+
+# 清除图标缓存
+echo "清除图标缓存..."
+if command -v gtk-update-icon-cache &> /dev/null; then
+    gtk-update-icon-cache -f -t /usr/share/icons/hicolor/ 2>/dev/null || true
+fi
+
+# 清除用户图标缓存
+if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
+    USER_HOME=$(eval echo ~$SUDO_USER)
+    if [ -d "$USER_HOME/.cache/icon-theme.cache" ]; then
+        echo "清除用户图标缓存..."
+        rm -rf "$USER_HOME/.cache/icon-theme.cache" 2>/dev/null || true
+    fi
+    if [ -d "$USER_HOME/.cache/thumbnails" ]; then
+        echo "清除缩略图缓存..."
+        rm -rf "$USER_HOME/.cache/thumbnails" 2>/dev/null || true
+    fi
 fi
 
 # 创建卸载脚本
@@ -127,6 +153,13 @@ if [ -f "$DESKTOP_FILE" ]; then
     rm -f "$DESKTOP_FILE"
 fi
 
+# 删除系统图标
+SYSTEM_ICON_FILE="/usr/share/icons/hicolor/256x256/apps/mNetAssist.png"
+if [ -f "$SYSTEM_ICON_FILE" ]; then
+    echo "删除系统图标: $SYSTEM_ICON_FILE"
+    rm -f "$SYSTEM_ICON_FILE"
+fi
+
 # 删除安装目录
 if [ -d "$INSTALL_DIR" ]; then
     echo "删除安装目录: $INSTALL_DIR"
@@ -137,6 +170,12 @@ fi
 if command -v update-desktop-database &> /dev/null; then
     echo "更新桌面数据库..."
     update-desktop-database /usr/share/applications/
+fi
+
+# 清除图标缓存
+echo "清除图标缓存..."
+if command -v gtk-update-icon-cache &> /dev/null; then
+    gtk-update-icon-cache -f -t /usr/share/icons/hicolor/ 2>/dev/null || true
 fi
 
 echo "mNetAssist 已成功卸载！"

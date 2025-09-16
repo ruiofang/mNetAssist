@@ -96,6 +96,10 @@ private slots:
     void logReceivedData(const QString &data);
     void logReceivedData(const QString &data, const QString &source);
 
+protected:
+    // 事件过滤器，用于处理发送文本框的键盘事件
+    bool eventFilter(QObject *obj, QEvent *event) override;
+
 private:
     Ui::mNetAssistWidget *ui;
 

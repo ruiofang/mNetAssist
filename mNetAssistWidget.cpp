@@ -17,6 +17,8 @@
 #include <QTextCharFormat>
 #include <QColor>
 #include <QDebug>
+#include <QKeyEvent>
+#include <QTextEdit>
 
 const char toHex[16] = {'0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F'};
 
@@ -107,6 +109,9 @@ mNetAssistWidget::mNetAssistWidget(QWidget *parent) :
      if (ui->lEditIpAddr->text().isEmpty() && lastProtocolType != 2) {
          ui->lEditIpAddr->setText(m_ip);
      }
+     
+     // 为发送文本框安装事件过滤器，实现Enter发送，Shift+Enter换行功能
+     ui->tEditSendText->installEventFilter(this);
 }
 
 mNetAssistWidget::~mNetAssistWidget()
@@ -664,6 +669,10 @@ void mNetAssistWidget::tcpServerDataReceived(char *msg,int length,int socketDesc
 /**********************************************************/
 void mNetAssistWidget::addClientLink(QString clientAddrPort,int socketDescriptor)
 {  
+    // 保存当前选中的索引和对应的文本
+    int currentIndex = ui->cBoxClients->currentIndex();
+    QString currentText = ui->cBoxClients->currentText();
+    
     if(TcpClientLinkCnt == 0){
         tcpClientSocketDescriptorList.clear();
         tcpClientSocketDescriptorList.append(0);
@@ -672,20 +681,56 @@ void mNetAssistWidget::addClientLink(QString clientAddrPort,int socketDescriptor
     TcpClientLinkCnt++;
     tcpClientSocketDescriptorList.append(socketDescriptor);
     ui->cBoxClients->addItem(clientAddrPort);
+    
+    // 恢复之前选中的索引，如果之前有选中项的话
+    if(currentIndex >= 0 && !currentText.isEmpty()) {
+        // 查找之前选中的文本是否还存在
+        int foundIndex = ui->cBoxClients->findText(currentText);
+        if(foundIndex >= 0) {
+            ui->cBoxClients->setCurrentIndex(foundIndex);
+        } else if(currentIndex < ui->cBoxClients->count()) {
+            // 如果找不到原来的文本，但原索引仍有效，则使用原索引
+            ui->cBoxClients->setCurrentIndex(currentIndex);
+        }
+    }
 }
 
 /**********************************************************/
 void mNetAssistWidget::removeClientLink(QString clientAddrPort,int socketDescriptor)
 {
     if(socketDescriptor!=-1) return;
+    
+    // 保存当前选中的索引和文本
+    int currentIndex = ui->cBoxClients->currentIndex();
+    QString currentText = ui->cBoxClients->currentText();
+    
     if(TcpClientLinkCnt <= 1){
         tcpClientSocketDescriptorList.clear();
         ui->cBoxClients->clear();
     }else{
         TcpClientLinkCnt--;
         int idx = ui->cBoxClients->findText(clientAddrPort);
+        
+        // 如果要删除的是当前选中的项，智能选择下一个项目
+        if(idx == currentIndex) {
+            // 如果不是最后一个项目，选择下一个；否则选择前一个
+            if(idx < ui->cBoxClients->count() - 1) {
+                ui->cBoxClients->setCurrentIndex(idx);  // 选择下一个
+            } else if(idx > 0) {
+                ui->cBoxClients->setCurrentIndex(idx - 1);  // 选择前一个
+            }
+        }
+        
         ui->cBoxClients->removeItem(idx);
         tcpClientSocketDescriptorList.removeAt(idx);
+        
+        // 如果删除的不是当前选中项，恢复之前的选择
+        if(idx != currentIndex && !currentText.isEmpty()) {
+            int newIndex = ui->cBoxClients->findText(currentText);
+            if(newIndex >= 0) {
+                ui->cBoxClients->setCurrentIndex(newIndex);
+            }
+        }
     }
 }
 
@@ -986,6 +1031,10 @@ void mNetAssistWidget::addToConnectionHistory(const QString &ip, const QString &
         return;
     }
     
+    // 保存当前选中的历史记录文本，避免索引跳转
+    QString currentIpText = ui->cBoxIpHistory->currentText();
+    QString currentPortText = ui->cBoxPortHistory->currentText();
+    
     // 保存当前协议类型
     lastProtocolType = ui->cBoxNetType->currentIndex();
     
@@ -1011,7 +1060,18 @@ void mNetAssistWidget::addToConnectionHistory(const QString &ip, const QString &
             ui->cBoxIpHistory->removeItem(ui->cBoxIpHistory->count() - 1);
         }
         ui->cBoxIpHistory->insertItem(1, trimmedIp);
-        ui->cBoxIpHistory->setCurrentIndex(0);
+        
+        // 恢复之前的IP历史选择，避免索引跳转
+        if (!currentIpText.isEmpty() && currentIpText != "▼") {
+            int newIndex = ui->cBoxIpHistory->findText(currentIpText);
+            if (newIndex >= 0) {
+                ui->cBoxIpHistory->setCurrentIndex(newIndex);
+            } else {
+                ui->cBoxIpHistory->setCurrentIndex(0);
+            }
+        } else {
+            ui->cBoxIpHistory->setCurrentIndex(0);
+        }
     }
     
     // 处理端口历史
@@ -1026,7 +1086,18 @@ void mNetAssistWidget::addToConnectionHistory(const QString &ip, const QString &
         ui->cBoxPortHistory->removeItem(ui->cBoxPortHistory->count() - 1);
     }
     ui->cBoxPortHistory->insertItem(1, trimmedPort);
-    ui->cBoxPortHistory->setCurrentIndex(0);
+    
+    // 恢复之前的端口历史选择，避免索引跳转
+    if (!currentPortText.isEmpty() && currentPortText != "▼") {
+        int newIndex = ui->cBoxPortHistory->findText(currentPortText);
+        if (newIndex >= 0) {
+            ui->cBoxPortHistory->setCurrentIndex(newIndex);
+        } else {
+            ui->cBoxPortHistory->setCurrentIndex(0);
+        }
+    } else {
+        ui->cBoxPortHistory->setCurrentIndex(0);
+    }
 }
 
 void mNetAssistWidget::on_cBoxIpHistory_currentTextChanged(const QString &text)
@@ -1209,8 +1280,8 @@ void mNetAssistWidget::addToLog(const QString &data, const QString &direction)
         // 获取当前时间
         QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz");
         
-        // 构建完整日志条目
-        logEntry = QString("[%1] %2: %3")
+        // 构建完整日志条目：时间戳和方向信息单独一行，数据内容另起一行
+        logEntry = QString("[%1] %2:\n%3")
                           .arg(timestamp)
                           .arg(direction)
                           .arg(data);
@@ -1288,4 +1359,28 @@ void mNetAssistWidget::logReceivedData(const QString &data, const QString &sourc
     }
     
     addToLog(data, source);
+}
+
+/**********************************************************/
+// 事件过滤器：处理发送文本框的键盘事件
+// Enter键发送数据，Shift+Enter键换行
+bool mNetAssistWidget::eventFilter(QObject *obj, QEvent *event)
+{
+    if (obj == ui->tEditSendText && event->type() == QEvent::KeyPress) {
+        QKeyEvent *keyEvent = static_cast<QKeyEvent*>(event);
+        
+        if (keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter) {
+            if (keyEvent->modifiers() & Qt::ShiftModifier) {
+                // Shift+Enter：插入换行符（默认行为）
+                return false; // 让文本框处理默认的换行
+            } else {
+                // 单独Enter：发送数据
+                on_pBtnSendData_clicked(); // 调用发送数据函数
+                return true; // 阻止默认的换行行为
+            }
+        }
+    }
+    
+    // 其他事件让父类处理
+    return QWidget::eventFilter(obj, event);
 }
