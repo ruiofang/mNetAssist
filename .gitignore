@@ -1,11 +1,5 @@
-*.user*
+.vscode
 *.o
-Makefile
-mNetAssist
-moc_*
-qrc_*
-ui_*.h
-*~
-core
-*.core
+*.log
+build/
 
