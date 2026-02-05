@@ -960,7 +960,10 @@ void mNetAssistWidget::addToSendHistory(const QString &data)
     if (existingIndex != -1) {
         sendHistory.removeAt(existingIndex);
         // 从下拉框中移除对应的项目（索引需要+1，因为第一项是提示文本）
+        // 注意：需要阻塞信号，避免触发 currentTextChanged
+        ui->cBoxSendHistory->blockSignals(true);
         ui->cBoxSendHistory->removeItem(existingIndex + 1);
+        ui->cBoxSendHistory->blockSignals(false);
     }
     
     // 添加到历史记录开头
@@ -969,7 +972,10 @@ void mNetAssistWidget::addToSendHistory(const QString &data)
     // 限制历史记录数量
     if (sendHistory.size() > maxHistorySize) {
         sendHistory.removeLast();
+        // 阻塞信号
+        ui->cBoxSendHistory->blockSignals(true);
         ui->cBoxSendHistory->removeItem(ui->cBoxSendHistory->count() - 1);
+        ui->cBoxSendHistory->blockSignals(false);
     }
     
     // 更新下拉列表（添加到第二项，第一项是提示文本）
@@ -977,10 +983,12 @@ void mNetAssistWidget::addToSendHistory(const QString &data)
     if (displayText.length() > 50) {
         displayText = displayText.left(50) + "...";
     }
+    // 阻塞信号，避免触发 currentTextChanged
+    ui->cBoxSendHistory->blockSignals(true);
     ui->cBoxSendHistory->insertItem(1, displayText);
-    
     // 重置选择到提示文本
     ui->cBoxSendHistory->setCurrentIndex(0);
+    ui->cBoxSendHistory->blockSignals(false);
     
     // 立即保存发送历史
     saveSendHistory();
@@ -993,19 +1001,38 @@ void mNetAssistWidget::on_cBoxSendHistory_currentTextChanged(const QString &text
     }
     
     isSelectingHistory = true;
-    int index = ui->cBoxSendHistory->currentIndex() - 1; // -1 因为第一项是提示文本
     
-    if (index >= 0 && index < sendHistory.size()) {
-        QString selectedData = sendHistory.at(index);
-        ui->tEditSendText->setPlainText(selectedData);
-        
-        // 使用QTimer延迟重置标志，避免信号冲突
-        QTimer::singleShot(100, [this]() {
-            isSelectingHistory = false;
-        });
+    // 通过显示文本查找对应的完整历史数据
+    // 下拉框中可能显示的是截断的文本（带...），需要在 sendHistory 中查找匹配项
+    QString selectedData;
+    bool found = false;
+    
+    // 如果文本以"..."结尾，说明是截断的，需要模糊匹配
+    if (text.endsWith("...")) {
+        QString prefix = text.left(text.length() - 3);
+        for (const QString &historyItem : sendHistory) {
+            if (historyItem.startsWith(prefix)) {
+                selectedData = historyItem;
+                found = true;
+                break;
+            }
+        }
     } else {
-        isSelectingHistory = false;
+        // 完整文本，直接查找
+        if (sendHistory.contains(text)) {
+            selectedData = text;
+            found = true;
+        }
     }
+    
+    if (found) {
+        ui->tEditSendText->setPlainText(selectedData);
+    }
+    
+    // 使用QTimer延迟重置标志，避免信号冲突
+    QTimer::singleShot(100, [this]() {
+        isSelectingHistory = false;
+    });
 }
 
 void mNetAssistWidget::on_pBtnClearHistory_clicked()
@@ -1037,6 +1064,10 @@ void mNetAssistWidget::addToConnectionHistory(const QString &ip, const QString &
     
     // 保存当前协议类型
     lastProtocolType = ui->cBoxNetType->currentIndex();
+    
+    // 阻塞信号，避免触发 currentTextChanged 事件
+    ui->cBoxIpHistory->blockSignals(true);
+    ui->cBoxPortHistory->blockSignals(true);
     
     // 根据协议类型处理不同的IP历史
     if (lastProtocolType == 2) { // TCP客户端模式，保存服务器IP
@@ -1098,6 +1129,10 @@ void mNetAssistWidget::addToConnectionHistory(const QString &ip, const QString &
     } else {
         ui->cBoxPortHistory->setCurrentIndex(0);
     }
+    
+    // 恢复信号
+    ui->cBoxIpHistory->blockSignals(false);
+    ui->cBoxPortHistory->blockSignals(false);
 }
 
 void mNetAssistWidget::on_cBoxIpHistory_currentTextChanged(const QString &text)
@@ -1172,6 +1207,18 @@ void mNetAssistWidget::loadConnectionHistory()
     QSettings settings(historyFilePath, QSettings::IniFormat);
     settings.beginGroup("ConnectionHistory");
     
+    // 阻塞信号，避免加载过程中触发不必要的事件
+    ui->cBoxIpHistory->blockSignals(true);
+    ui->cBoxPortHistory->blockSignals(true);
+    
+    // 确保下拉框有提示文本
+    if (ui->cBoxIpHistory->count() == 0) {
+        ui->cBoxIpHistory->addItem("▼");
+    }
+    if (ui->cBoxPortHistory->count() == 0) {
+        ui->cBoxPortHistory->addItem("▼");
+    }
+    
     // 加载IP历史
     int ipSize = settings.beginReadArray("IpHistory");
     for (int i = 0; i < ipSize && i < maxConnectionHistorySize; ++i) {
@@ -1211,6 +1258,10 @@ void mNetAssistWidget::loadConnectionHistory()
     lastProtocolType = settings.value("LastProtocolType", 0).toInt();
     
     settings.endGroup();
+    
+    // 恢复信号
+    ui->cBoxIpHistory->blockSignals(false);
+    ui->cBoxPortHistory->blockSignals(false);
     
     // 设置最后使用的协议类型为默认值
     ui->cBoxNetType->setCurrentIndex(lastProtocolType);
